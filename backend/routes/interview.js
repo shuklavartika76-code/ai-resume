@@ -81,7 +81,8 @@ router.post('/submit', async (req, res) => {
             interview.role, 
             interview.experience, 
             interview.questions, 
-            transcript
+            transcript,
+            interview.resumeText || ''
         );
 
         const updated = await updateInterview(interviewId, {

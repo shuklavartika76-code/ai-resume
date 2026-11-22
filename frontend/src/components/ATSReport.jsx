@@ -1,11 +1,21 @@
 import React, { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Target, CheckCircle2, AlertCircle, ChevronRight, Loader2, Zap } from 'lucide-react';
+import { Target, CheckCircle2, AlertCircle, ChevronRight, Loader2, Zap, ArrowLeft } from 'lucide-react';
+
+const API = '/api/interview';
+
+const fetchWithTimeout = (url, options, timeoutMs = 120000) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+};
 
 export default function ATSReport({ onStartInterview }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   // If user navigated directly here without state, send them back
   if (!location.state) {
@@ -17,15 +27,21 @@ export default function ATSReport({ onStartInterview }) {
 
   const handleStartInterview = async () => {
     setLoading(true);
+    setError('');
     try {
-      const res = await fetch('http://localhost:5000/api/interview/generate', {
+      const res = await fetchWithTimeout(`${API}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role, experience, resumeText })
       });
-      if (!res.ok) throw new Error('Question generation failed');
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to generate questions (HTTP ${res.status})`);
+      }
+
       const genData = await res.json();
-      
+
       onStartInterview({
         interviewId: genData.interviewId,
         questions: genData.questions,
@@ -33,43 +49,75 @@ export default function ATSReport({ onStartInterview }) {
         experience
       });
       navigate('/interview');
-    } catch (error) {
-      console.error(error);
-      alert('Failed to generate interview. Check console.');
+    } catch (err) {
+      console.error('Generate questions error:', err);
+      if (err.name === 'AbortError') {
+        setError('Request timed out while generating questions. Please try again.');
+      } else {
+        setError(err.message || 'Failed to generate interview questions. Please try again.');
+      }
       setLoading(false);
     }
   };
 
+  const scoreColor = atsData.atsScore >= 75
+    ? 'var(--accent-green)'
+    : atsData.atsScore >= 50
+    ? 'var(--accent-gold)'
+    : 'var(--accent-red)';
+
   return (
     <div className="fade-in" style={{ padding: '2rem 0', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      
-      <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
-        <h2 style={{ fontSize: '2.5rem', fontWeight: 700 }}>ATS Resume Analysis</h2>
-        <p style={{ color: 'var(--text-muted)' }}>Target Role: <span style={{ color: 'white', fontWeight: 600 }}>{role}</span></p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <button className="glass-button secondary" onClick={() => navigate('/')} style={{ padding: '8px 16px' }}>
+          <ArrowLeft size={18} /> Back
+        </button>
+        <div>
+          <h2 style={{ fontSize: '2rem', fontWeight: 700 }}>ATS Resume Analysis</h2>
+          <p style={{ color: 'var(--text-muted)' }}>
+            Target Role: <span style={{ color: 'white', fontWeight: 600 }}>{role}</span>
+            {' · '}
+            <span style={{ color: 'var(--text-muted)' }}>{experience}</span>
+          </p>
+        </div>
       </div>
 
+      {error && (
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)',
+          border: '1px solid var(--accent-red)',
+          color: '#FCA5A5',
+          padding: '14px 16px',
+          borderRadius: '10px',
+          textAlign: 'center'
+        }}>
+          {error}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '2rem' }}>
-        
+
         {/* Score Card */}
         <div className="glass-panel" style={{ padding: '3rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-          <h3 style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Match Score</h3>
-          <div style={{ 
-            width: '180px', height: '180px', borderRadius: '50%', 
-            background: `conic-gradient(${atsData.atsScore >= 75 ? 'var(--accent-green)' : atsData.atsScore >= 50 ? 'var(--accent-gold)' : 'var(--accent-red)'} ${atsData.atsScore}%, rgba(255,255,255,0.1) 0)`,
+          <h3 style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>ATS Match Score</h3>
+          <div style={{
+            width: '180px', height: '180px', borderRadius: '50%',
+            background: `conic-gradient(${scoreColor} ${atsData.atsScore}%, rgba(255,255,255,0.08) 0)`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             marginBottom: '1rem'
           }}>
-            <div style={{ 
-              width: '160px', height: '160px', borderRadius: '50%', 
-              background: 'var(--bg-dark)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' 
+            <div style={{
+              width: '156px', height: '156px', borderRadius: '50%',
+              background: 'var(--bg-dark)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center'
             }}>
-              <span style={{ fontSize: '3.5rem', fontWeight: 800 }}>{atsData.atsScore}%</span>
+              <span style={{ fontSize: '3rem', fontWeight: 800, color: scoreColor }}>{atsData.atsScore}%</span>
             </div>
           </div>
-          <p style={{ color: 'var(--text-muted)' }}>
-            {atsData.atsScore >= 75 ? "Great match! You're ready." : 
-             atsData.atsScore >= 50 ? "Good, but missing some keywords." : 
-             "Low match. Consider adding missing keywords."}
+          <p style={{ color: 'var(--text-muted)', lineHeight: 1.5 }}>
+            {atsData.atsScore >= 75 ? "🎉 Great match! You're ready." :
+              atsData.atsScore >= 50 ? '⚠️ Good, but missing some keywords.' :
+              '❌ Low match. Add missing keywords to your resume.'}
           </p>
         </div>
 
@@ -103,7 +151,6 @@ export default function ATSReport({ onStartInterview }) {
             </div>
           </div>
         </div>
-
       </div>
 
       {/* Improvement Tips */}
@@ -121,20 +168,22 @@ export default function ATSReport({ onStartInterview }) {
         </ul>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', marginBottom: '2rem' }}>
-        <button 
-          className="glass-button" 
-          style={{ padding: '16px 32px', fontSize: '1.2rem' }}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2rem' }}>
+        <button
+          className="glass-button"
+          style={{ padding: '16px 40px', fontSize: '1.2rem' }}
           onClick={handleStartInterview}
           disabled={loading}
         >
           {loading ? (
-            <><Loader2 className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} /> Preparing AI Interviewer...</>
+            <><Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} /> Preparing AI Interviewer...</>
           ) : (
             <>Proceed to Mock Interview <ChevronRight size={24} /></>
           )}
         </button>
       </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
